@@ -1,5 +1,27 @@
 {
   "version": "7",
   "dialect": "mysql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1788540478335,
+      "tag": "0000_fat_talon",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1788540628963,
+      "tag": "0001_magenta_steel_serpent",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1788541110411,
+      "tag": "0002_productive_jack_murdock",
+      "breakpoints": true
+    }
+  ]
 }

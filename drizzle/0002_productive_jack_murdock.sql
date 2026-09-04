@@ -1,0 +1,9 @@
+ALTER TABLE `downloads` ADD CONSTRAINT `downloads_pdfId_pdf_files_id_fk` FOREIGN KEY (`pdfId`) REFERENCES `pdf_files`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `downloads` ADD CONSTRAINT `downloads_userId_users_id_fk` FOREIGN KEY (`userId`) REFERENCES `users`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `pdf_files` ADD CONSTRAINT `pdf_files_subjectId_subjects_id_fk` FOREIGN KEY (`subjectId`) REFERENCES `subjects`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `pdf_files` ADD CONSTRAINT `pdf_files_uploadedBy_users_id_fk` FOREIGN KEY (`uploadedBy`) REFERENCES `users`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `reports` ADD CONSTRAINT `reports_pdfId_pdf_files_id_fk` FOREIGN KEY (`pdfId`) REFERENCES `pdf_files`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `reports` ADD CONSTRAINT `reports_reportedBy_users_id_fk` FOREIGN KEY (`reportedBy`) REFERENCES `users`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `subjects` ADD CONSTRAINT `subjects_createdBy_users_id_fk` FOREIGN KEY (`createdBy`) REFERENCES `users`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `views` ADD CONSTRAINT `views_pdfId_pdf_files_id_fk` FOREIGN KEY (`pdfId`) REFERENCES `pdf_files`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `views` ADD CONSTRAINT `views_userId_users_id_fk` FOREIGN KEY (`userId`) REFERENCES `users`(`id`) ON DELETE set null ON UPDATE no action;
