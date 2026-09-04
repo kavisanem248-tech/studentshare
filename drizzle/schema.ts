@@ -14,12 +14,31 @@ export const users = mysqlTable("users", {
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
+  passwordHash: varchar("passwordHash", { length: 255 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
-});
+}, table => ({
+  emailIdx: uniqueIndex("users_email_idx").on(table.email),
+}));
+
+export const sessions = mysqlTable(
+  "sessions",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    tokenHash: varchar("tokenHash", { length: 128 }).notNull().unique(),
+    userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    expiresAt: timestamp("expiresAt").notNull(),
+    revokedAt: timestamp("revokedAt"),
+  },
+  table => ({
+    userIdx: index("sessions_user_idx").on(table.userId),
+    expiresIdx: index("sessions_expires_idx").on(table.expiresAt),
+  }),
+);
 
 export const subjects = mysqlTable(
   "subjects",
@@ -115,6 +134,7 @@ export const reports = mysqlTable(
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
+export type Session = typeof sessions.$inferSelect;
 export type Subject = typeof subjects.$inferSelect;
 export type PdfFile = typeof pdfFiles.$inferSelect;
 export type Report = typeof reports.$inferSelect;

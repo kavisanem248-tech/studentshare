@@ -5,6 +5,7 @@ import {
   downloads,
   pdfFiles,
   reports,
+  sessions,
   subjects,
   users,
   views,
@@ -32,11 +33,12 @@ export async function upsertUser(user: InsertUser): Promise<void> {
 
   const values: InsertUser = { openId: user.openId };
   const updateSet: Record<string, unknown> = {};
-  const textFields = ["name", "email", "loginMethod"] as const;
+  const textFields = ["name", "email", "passwordHash", "loginMethod"] as const;
   textFields.forEach(field => {
     if (user[field] !== undefined) {
-      values[field] = user[field] ?? null;
-      updateSet[field] = user[field] ?? null;
+      const normalized = field === "email" && user[field] ? user[field].trim().toLowerCase() : user[field] ?? null;
+      values[field] = normalized;
+      updateSet[field] = normalized;
     }
   });
   if (user.lastSignedIn !== undefined) {
@@ -55,11 +57,46 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
 }
 
+export async function getUserById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result[0];
+}
+
 export async function getUserByOpenId(openId: string) {
   const db = await getDb();
   if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
   return result[0];
+}
+
+export async function getUserByEmail(email: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.email, email.trim().toLowerCase())).limit(1);
+  return result[0];
+}
+
+export async function createSession(input: { tokenHash: string; userId: number; expiresAt: Date }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.insert(sessions).values(input);
+}
+
+export async function getSessionByTokenHash(tokenHash: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(sessions).where(eq(sessions.tokenHash, tokenHash)).limit(1);
+  const session = result[0];
+  if (!session || session.revokedAt || session.expiresAt.getTime() <= Date.now()) return undefined;
+  return session;
+}
+
+export async function revokeSessionByTokenHash(tokenHash: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(sessions).set({ revokedAt: new Date() }).where(eq(sessions.tokenHash, tokenHash));
 }
 
 export async function listSubjects() {
@@ -145,6 +182,13 @@ export async function getPdfById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
   const result = await db.select(pdfSelect()).from(pdfFiles).leftJoin(subjects, eq(pdfFiles.subjectId, subjects.id)).leftJoin(users, eq(pdfFiles.uploadedBy, users.id)).where(eq(pdfFiles.id, id)).limit(1);
+  return result[0];
+}
+
+export async function getPdfStorageRecord(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select({ id: pdfFiles.id, fileKey: pdfFiles.fileKey, fileName: pdfFiles.fileName, fileSize: pdfFiles.fileSize, uploadedBy: pdfFiles.uploadedBy }).from(pdfFiles).where(eq(pdfFiles.id, id)).limit(1);
   return result[0];
 }
 

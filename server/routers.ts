@@ -1,7 +1,9 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { parse as parseCookieHeader } from "cookie";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { hashSessionToken } from "./_core/sdk";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
   createSubject,
@@ -13,9 +15,10 @@ import {
   getProfile,
   listPdfs,
   listSubjects,
+  revokeSessionByTokenHash,
 } from "./db";
 import { storagePut } from "./storage";
-import { downloads, pdfFiles, reports, subjects, users, views } from "../drizzle/schema";
+import { pdfFiles, reports, subjects, users, views } from "../drizzle/schema";
 import { eq, sql } from "drizzle-orm";
 
 const uploadInput = z.object({
@@ -37,9 +40,15 @@ const pdfIdInput = z.object({ id: z.number().int().positive() });
 export const appRouter = router({
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      const cookies = parseCookieHeader(ctx.req.headers.cookie ?? "");
+      const bearer = typeof ctx.req.headers.authorization === "string" && ctx.req.headers.authorization.startsWith("Bearer ")
+        ? ctx.req.headers.authorization.slice(7)
+        : undefined;
+      const token = cookies[COOKIE_NAME] || bearer;
+      if (token) await revokeSessionByTokenHash(hashSessionToken(token));
       const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      ctx.res.clearCookie(COOKIE_NAME, cookieOptions);
       return { success: true } as const;
     }),
   }),
@@ -76,7 +85,10 @@ export const appRouter = router({
         academicYear: input.academicYear || null,
         semester: input.semester || null,
       });
-      return { success: true, id: Number(result[0].insertId), message: "PDF uploaded successfully!" };
+      const id = Number(result[0].insertId);
+      const pdf = await getPdfById(id);
+      if (!pdf) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "PDF was uploaded but could not be loaded." });
+      return { success: true, id, pdf, message: "PDF uploaded successfully!" };
     }),
     update: protectedProcedure.input(z.object({ id: z.number().int().positive(), title: z.string().trim().min(2).max(240), subjectId: z.number().int().positive(), unit: z.string().trim().min(1).max(40), description: z.string().trim().max(2000).optional(), tags: z.string().trim().max(300).optional(), academicYear: z.string().trim().max(20).optional(), semester: z.string().trim().max(40).optional() })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -104,14 +116,12 @@ export const appRouter = router({
       await db.update(pdfFiles).set({ viewCount: sql`${pdfFiles.viewCount} + 1` }).where(eq(pdfFiles.id, input.id));
       return { success: true };
     }),
-    download: publicProcedure.input(pdfIdInput).mutation(async ({ input, ctx }) => {
+    download: publicProcedure.input(pdfIdInput).mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable." });
-      const record = await db.select({ id: pdfFiles.id, fileUrl: pdfFiles.fileUrl }).from(pdfFiles).where(eq(pdfFiles.id, input.id)).limit(1);
+      const record = await db.select({ id: pdfFiles.id }).from(pdfFiles).where(eq(pdfFiles.id, input.id)).limit(1);
       if (!record[0]) throw new TRPCError({ code: "NOT_FOUND", message: "PDF not found." });
-      await db.insert(downloads).values({ pdfId: input.id, userId: ctx.user?.id ?? null });
-      await db.update(pdfFiles).set({ downloadCount: sql`${pdfFiles.downloadCount} + 1` }).where(eq(pdfFiles.id, input.id));
-      return { success: true, url: record[0].fileUrl };
+      return { success: true, url: `/api/pdfs/${record[0].id}/download` };
     }),
     report: protectedProcedure.input(z.object({ pdfId: z.number().int().positive(), reason: z.string().trim().min(2).max(80), description: z.string().trim().max(1000).optional() })).mutation(async ({ input, ctx }) => {
       const db = await getDb();

@@ -5,7 +5,6 @@ import { httpBatchLink, TRPCClientError } from "@trpc/client";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
-import { startLogin } from "./const";
 import "./index.css";
 
 const queryClient = new QueryClient();
@@ -18,7 +17,9 @@ const redirectToLoginIfUnauthorized = (error: unknown) => {
 
   if (!isUnauthorized) return;
 
-  startLogin();
+  // Protected screens render their own signed-out state. Automatically
+  // restarting OAuth here caused logout to immediately re-authenticate the
+  // previous account and made account switching unreliable.
 };
 
 queryClient.getQueryCache().subscribe(event => {

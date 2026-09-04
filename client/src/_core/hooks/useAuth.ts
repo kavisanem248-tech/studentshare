@@ -1,7 +1,7 @@
 import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { TRPCClientError } from "@trpc/client";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect } from "react";
 
 type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
@@ -43,31 +43,23 @@ export function useAuth(options?: UseAuthOptions) {
       // header-based sessions (Safari ITP / WebView) are logged out too. The
       // backend cookie is cleared by the logout mutation.
       try {
-        sessionStorage.removeItem("manus-cookie");
+      sessionStorage.removeItem("manus-cookie");
       } catch {}
       utils.auth.me.setData(undefined, null);
       await utils.auth.me.invalidate();
+      await utils.invalidate();
+      if (typeof window !== "undefined" && window.location.pathname !== "/") {
+        window.location.assign("/");
+      }
     }
   }, [logoutMutation, utils]);
 
-  const state = useMemo(() => {
-    localStorage.setItem(
-      "manus-runtime-user-info",
-      JSON.stringify(meQuery.data)
-    );
-    return {
-      user: meQuery.data ?? null,
-      loading: meQuery.isLoading || logoutMutation.isPending,
-      error: meQuery.error ?? logoutMutation.error ?? null,
-      isAuthenticated: Boolean(meQuery.data),
-    };
-  }, [
-    meQuery.data,
-    meQuery.error,
-    meQuery.isLoading,
-    logoutMutation.error,
-    logoutMutation.isPending,
-  ]);
+  const state = {
+    user: meQuery.data ?? null,
+    loading: meQuery.isLoading || logoutMutation.isPending,
+    error: meQuery.error ?? logoutMutation.error ?? null,
+    isAuthenticated: Boolean(meQuery.data),
+  };
 
   useEffect(() => {
     if (!redirectOnUnauthenticated) return;

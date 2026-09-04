@@ -22,6 +22,20 @@
       "when": 1788541110411,
       "tag": "0002_productive_jack_murdock",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1788541750470,
+      "tag": "0003_sloppy_hedge_knight",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1788542210132,
+      "tag": "0004_cute_night_nurse",
+      "breakpoints": true
     }
   ]
 }

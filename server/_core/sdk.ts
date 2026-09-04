@@ -2,6 +2,7 @@ import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS, decodeOAuthState } from "@s
 import { ForbiddenError } from "@shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
+import { createHash, randomBytes } from "node:crypto";
 import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
@@ -158,23 +159,15 @@ class SDKServer {
     return new TextEncoder().encode(secret);
   }
 
-  /**
-   * Create a session token for a Manus user openId
-   * @example
-   * const sessionToken = await sdk.createSessionToken(userInfo.openId);
-   */
+  /** Create an opaque token whose hash is stored in the database. */
   async createSessionToken(
-    openId: string,
-    options: { expiresInMs?: number; name?: string } = {}
+    userId: number,
+    options: { expiresInMs?: number } = {},
   ): Promise<string> {
-    return this.signSession(
-      {
-        openId,
-        appId: ENV.appId,
-        name: options.name || "",
-      },
-      options
-    );
+    const token = randomBytes(48).toString("base64url");
+    const expiresAt = new Date(Date.now() + (options.expiresInMs ?? ONE_YEAR_MS));
+    await db.createSession({ tokenHash: hashSessionToken(token), userId, expiresAt });
+    return token;
   }
 
   async signSession(
@@ -270,6 +263,20 @@ class SDKServer {
       }
     }
 
+    if (!sessionToken) {
+      throw ForbiddenError("Invalid session cookie");
+    }
+
+    const storedSession = await db.getSessionByTokenHash(hashSessionToken(sessionToken));
+    if (storedSession) {
+      const user = await db.getUserById(storedSession.userId);
+      if (user) {
+        await db.upsertUser({ openId: user.openId, lastSignedIn: new Date() });
+        return user;
+      }
+    }
+
+    // Legacy JWT sessions remain readable during a rolling migration.
     const session = await this.verifySession(sessionToken);
 
     if (!session) {
@@ -348,3 +355,7 @@ function buildCronUser(
 }
 
 export const sdk = new SDKServer();
+
+export function hashSessionToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
