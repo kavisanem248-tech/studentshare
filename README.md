@@ -4,7 +4,7 @@ StudentShare is a student-to-student study-material library for discovering, sha
 
 ## What is included
 
-The app includes a responsive public landing page, Manus OAuth sign-in, student dashboard, subjects directory, PostgreSQL/MySQL-compatible Drizzle schema provided by WebDev, PDF metadata upload flow backed by persistent Manus storage, search and filters, in-browser PDF preview, download/view tracking, sharing, reports, ownership-protected edit/delete flows, profile editing, and an admin moderation dashboard.
+The app includes a responsive public landing page, Manus OAuth sign-in, student dashboard, subjects directory, friend-circle groups with unique IDs and bcrypt-protected passwords, member-only PDF visibility, PostgreSQL/MySQL-compatible Drizzle schema provided by WebDev, PDF metadata upload flow backed by persistent Manus storage, search and filters, in-browser PDF preview, download/view tracking, sharing, reports, ownership-protected edit/delete flows, profile editing, and an admin moderation dashboard.
 
 The WebDev `web-db-user` scaffold uses the platform's managed MySQL/TiDB-compatible database connection rather than PostgreSQL because that is the stable database service exposed by this deployment environment. Uploaded files are stored through the managed S3-compatible storage helper in `server/storage.ts`; the local filesystem is not used for PDF persistence.
 
@@ -29,7 +29,7 @@ PDF files are validated by MIME type, extension, and configurable size before be
 
 ## Data model
 
-The schema in `drizzle/schema.ts` contains `users`, `subjects`, `pdf_files`, `downloads`, `views`, and `reports`. Indexed fields cover subject, uploader, title, creation date, download count, and report status. The migration is in `drizzle/0001_magenta_steel_serpent.sql`.
+The schema in `drizzle/schema.ts` contains `users`, `groups`, `group_members`, `subjects`, `pdf_files`, `downloads`, `views`, and `reports`. Indexed fields cover subject, group, uploader, title, creation date, download count, and report status. The group-access migration is in `drizzle/0005_sweet_cloak.sql`.
 
 ## Useful routes
 
@@ -39,7 +39,8 @@ The schema in `drizzle/schema.ts` contains `users`, `subjects`, `pdf_files`, `do
 | `/login` and `/signup` | Auth entry points |
 | `/dashboard` | Personal student dashboard |
 | `/subjects` | Subject directory and subject creation |
-| `/browse` | Searchable, filterable PDF library |
+| `/browse` | Searchable, filterable PDF library, including circles the signed-in user belongs to |
+| `/groups` | Create or join password-protected friend circles |
 | `/upload` | PDF upload form |
 | `/uploads` | Current user's uploads |
 | `/studentshare/pdf/:id` | PDF preview, download, share, and report |
@@ -57,4 +58,4 @@ pnpm test
 pnpm build
 ```
 
-The app is designed mobile-first with touch-friendly controls, a compact hamburger navigation, responsive card grids, visible focus states, friendly empty/error states, and reduced-motion support.
+The app is designed mobile-first with touch-friendly controls, a compact hamburger navigation, responsive card grids, visible focus states, friendly empty/error states, and reduced-motion support. Group PDFs are hidden from signed-out users and non-members at both the tRPC layer and direct file/download endpoints; only a bcrypt hash is stored for each group password.

@@ -1,8 +1,10 @@
-import { and, asc, count, desc, eq, like, or, sql, sum } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, like, or, sql, sum } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser,
   downloads,
+  groupMembers,
+  groups,
   pdfFiles,
   reports,
   sessions,
@@ -126,6 +128,61 @@ export async function createSubject(input: {
   return created[0];
 }
 
+export async function createGroup(input: { groupId: string; name: string; passwordHash: string; createdBy: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const result = await db.insert(groups).values(input);
+  const id = Number(result[0].insertId);
+  await db.insert(groupMembers).values({ groupId: id, userId: input.createdBy, role: "owner" });
+  const created = await db.select().from(groups).where(eq(groups.id, id)).limit(1);
+  return created[0];
+}
+
+export async function getGroupByCode(groupId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(groups).where(eq(groups.groupId, groupId)).limit(1);
+  return result[0];
+}
+
+export async function getGroupById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(groups).where(eq(groups.id, id)).limit(1);
+  return result[0];
+}
+
+export async function addGroupMember(groupId: number, userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.insert(groupMembers).values({ groupId, userId, role: "member" }).onDuplicateKeyUpdate({ set: { joinedAt: new Date() } });
+  return db.select({ group: groups, role: groupMembers.role, joinedAt: groupMembers.joinedAt }).from(groupMembers).innerJoin(groups, eq(groupMembers.groupId, groups.id)).where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId))).limit(1);
+}
+
+export async function isGroupMember(groupId: number, userId: number) {
+  const db = await getDb();
+  if (!db) return false;
+  const result = await db.select({ id: groupMembers.id }).from(groupMembers).where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId))).limit(1);
+  return Boolean(result[0]);
+}
+
+export async function listMyGroups(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const memberships = await db.select({ group: groups, role: groupMembers.role }).from(groupMembers).innerJoin(groups, eq(groupMembers.groupId, groups.id)).where(eq(groupMembers.userId, userId)).orderBy(desc(groups.createdAt));
+  return Promise.all(memberships.map(async membership => {
+    const rows = await db.select({ total: count() }).from(groupMembers).where(eq(groupMembers.groupId, membership.group.id));
+    return { ...membership.group, role: membership.role, memberCount: Number(rows[0]?.total ?? 0) };
+  }));
+}
+
+async function getMemberGroupIds(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({ groupId: groupMembers.groupId }).from(groupMembers).where(eq(groupMembers.userId, userId));
+  return rows.map(row => row.groupId);
+}
+
 export type PdfListParams = {
   q?: string;
   subjectId?: number;
@@ -133,12 +190,14 @@ export type PdfListParams = {
   sort?: "latest" | "downloads" | "views" | "az";
   page?: number;
   pageSize?: number;
+  userId?: number;
 };
 
 function pdfSelect() {
   return {
     id: pdfFiles.id,
     title: pdfFiles.title,
+    groupId: pdfFiles.groupId,
     unit: pdfFiles.unit,
     description: pdfFiles.description,
     tags: pdfFiles.tags,
@@ -169,6 +228,8 @@ export async function listPdfs(params: PdfListParams = {}) {
     const q = `%${params.q.trim()}%`;
     filters.push(or(like(pdfFiles.title, q), like(subjects.name, q), like(pdfFiles.description, q), like(pdfFiles.tags, q), like(pdfFiles.unit, q)));
   }
+  const groupIds = params.userId ? await getMemberGroupIds(params.userId) : [];
+  filters.push(groupIds.length ? or(isNull(pdfFiles.groupId), inArray(pdfFiles.groupId, groupIds)) : isNull(pdfFiles.groupId));
   const where = filters.length ? and(...filters) : undefined;
   const orderBy = params.sort === "downloads" ? desc(pdfFiles.downloadCount) : params.sort === "views" ? desc(pdfFiles.viewCount) : params.sort === "az" ? asc(pdfFiles.title) : desc(pdfFiles.createdAt);
   const [items, totalRows] = await Promise.all([
@@ -178,18 +239,22 @@ export async function listPdfs(params: PdfListParams = {}) {
   return { items, total: Number(totalRows[0]?.total ?? 0), page, pageSize };
 }
 
-export async function getPdfById(id: number) {
+export async function getPdfById(id: number, userId?: number) {
   const db = await getDb();
   if (!db) return undefined;
   const result = await db.select(pdfSelect()).from(pdfFiles).leftJoin(subjects, eq(pdfFiles.subjectId, subjects.id)).leftJoin(users, eq(pdfFiles.uploadedBy, users.id)).where(eq(pdfFiles.id, id)).limit(1);
-  return result[0];
+  const pdf = result[0];
+  if (pdf?.groupId && (!userId || !(await isGroupMember(pdf.groupId, userId)))) return undefined;
+  return pdf;
 }
 
-export async function getPdfStorageRecord(id: number) {
+export async function getPdfStorageRecord(id: number, userId?: number) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.select({ id: pdfFiles.id, fileKey: pdfFiles.fileKey, fileName: pdfFiles.fileName, fileSize: pdfFiles.fileSize, uploadedBy: pdfFiles.uploadedBy }).from(pdfFiles).where(eq(pdfFiles.id, id)).limit(1);
-  return result[0];
+  const result = await db.select({ id: pdfFiles.id, groupId: pdfFiles.groupId, fileKey: pdfFiles.fileKey, fileName: pdfFiles.fileName, fileSize: pdfFiles.fileSize, uploadedBy: pdfFiles.uploadedBy }).from(pdfFiles).where(eq(pdfFiles.id, id)).limit(1);
+  const record = result[0];
+  if (record?.groupId && (!userId || !(await isGroupMember(record.groupId, userId)))) return undefined;
+  return record;
 }
 
 export async function getMyUploads(userId: number) {

@@ -40,6 +40,36 @@ export const sessions = mysqlTable(
   }),
 );
 
+export const groups = mysqlTable(
+  "groups",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    groupId: varchar("groupId", { length: 32 }).notNull().unique(),
+    name: varchar("name", { length: 120 }).notNull(),
+    passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
+    createdBy: int("createdBy").notNull().references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    creatorIdx: index("groups_creator_idx").on(table.createdBy),
+  }),
+);
+
+export const groupMembers = mysqlTable(
+  "group_members",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    groupId: int("groupId").notNull().references(() => groups.id, { onDelete: "cascade" }),
+    userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    role: mysqlEnum("role", ["owner", "member"]).default("member").notNull(),
+    joinedAt: timestamp("joinedAt").defaultNow().notNull(),
+  },
+  table => ({
+    groupUserIdx: uniqueIndex("group_members_group_user_idx").on(table.groupId, table.userId),
+    userIdx: index("group_members_user_idx").on(table.userId),
+  }),
+);
+
 export const subjects = mysqlTable(
   "subjects",
   {
@@ -63,6 +93,7 @@ export const pdfFiles = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     title: varchar("title", { length: 240 }).notNull(),
     subjectId: int("subjectId").notNull().references(() => subjects.id, { onDelete: "restrict" }),
+    groupId: int("groupId").references(() => groups.id, { onDelete: "set null" }),
     unit: varchar("unit", { length: 40 }).notNull(),
     description: text("description"),
     tags: text("tags"),
@@ -80,6 +111,7 @@ export const pdfFiles = mysqlTable(
   },
   table => ({
     subjectIdx: index("pdf_subject_idx").on(table.subjectId),
+    groupIdx: index("pdf_group_idx").on(table.groupId),
     uploaderIdx: index("pdf_uploader_idx").on(table.uploadedBy),
     titleIdx: index("pdf_title_idx").on(table.title),
     createdAtIdx: index("pdf_created_at_idx").on(table.createdAt),
@@ -138,3 +170,5 @@ export type Session = typeof sessions.$inferSelect;
 export type Subject = typeof subjects.$inferSelect;
 export type PdfFile = typeof pdfFiles.$inferSelect;
 export type Report = typeof reports.$inferSelect;
+export type Group = typeof groups.$inferSelect;
+export type GroupMember = typeof groupMembers.$inferSelect;

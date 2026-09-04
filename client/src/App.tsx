@@ -9,6 +9,7 @@ import {
   BrowsePage,
   DashboardPage,
   LandingPage,
+  GroupsPage,
   MyUploadsPage,
   PdfViewerPage,
   ProfilePage,
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/signup"><AuthPage mode="signup" /></Route>
       <Route path="/dashboard" component={DashboardPage} />
       <Route path="/subjects" component={SubjectsPage} />
+      <Route path="/groups" component={GroupsPage} />
       <Route path="/browse" component={BrowsePage} />
       <Route path="/upload"><UploadPage /></Route>
       <Route path="/edit/:id">{params => <UploadPage editId={Number(params.id)} />}</Route>

@@ -36,6 +36,13 @@
       "when": 1788542210132,
       "tag": "0004_cute_night_nurse",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1788545220447,
+      "tag": "0005_sweet_cloak",
+      "breakpoints": true
     }
   ]
 }

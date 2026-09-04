@@ -7,12 +7,17 @@ import { hashSessionToken } from "./_core/sdk";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
   createSubject,
+  addGroupMember,
+  createGroup,
+  getGroupByCode,
   getAdminStats,
   getDashboardStats,
   getDb,
   getMyUploads,
   getPdfById,
   getProfile,
+  isGroupMember,
+  listMyGroups,
   listPdfs,
   listSubjects,
   revokeSessionByTokenHash,
@@ -20,6 +25,8 @@ import {
 import { storagePut } from "./storage";
 import { pdfFiles, reports, subjects, users, views } from "../drizzle/schema";
 import { eq, sql } from "drizzle-orm";
+import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
 
 const uploadInput = z.object({
   title: z.string().trim().min(2).max(240),
@@ -33,6 +40,7 @@ const uploadInput = z.object({
   fileType: z.string().refine(value => value === "application/pdf", "Only PDF files are allowed."),
   fileSize: z.number().int().positive().max(Number(process.env.MAX_FILE_SIZE_BYTES || 20 * 1024 * 1024)),
   fileData: z.string().min(1),
+  groupId: z.number().int().positive().nullable().optional(),
 });
 
 const pdfIdInput = z.object({ id: z.number().int().positive() });
@@ -56,9 +64,30 @@ export const appRouter = router({
     list: publicProcedure.query(() => listSubjects()),
     create: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(160), code: z.string().trim().max(40).optional(), department: z.string().trim().max(120).optional(), semester: z.string().trim().max(40).optional() })).mutation(({ input, ctx }) => createSubject({ ...input, createdBy: ctx.user.id })),
   }),
+  groups: router({
+    mine: protectedProcedure.query(({ ctx }) => listMyGroups(ctx.user.id)),
+    create: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(120), password: z.string().min(8).max(120) })).mutation(async ({ input, ctx }) => {
+      const passwordHash = await bcrypt.hash(input.password, 12);
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const groupId = `FRIEND-${randomBytes(3).toString("hex").toUpperCase()}`;
+        try {
+          const group = await createGroup({ groupId, name: input.name, passwordHash, createdBy: ctx.user.id });
+          return group && { id: group.id, groupId: group.groupId, name: group.name, createdAt: group.createdAt };
+        }
+        catch (error) { if (attempt === 2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Could not create the group. Please try again." }); }
+      }
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Could not create the group. Please try again." });
+    }),
+    join: protectedProcedure.input(z.object({ groupId: z.string().trim().min(4).max(32), password: z.string().min(1).max(120) })).mutation(async ({ input, ctx }) => {
+      const group = await getGroupByCode(input.groupId.toUpperCase());
+      if (!group || !(await bcrypt.compare(input.password, group.passwordHash))) throw new TRPCError({ code: "FORBIDDEN", message: "That group ID or password is incorrect." });
+      await addGroupMember(group.id, ctx.user.id);
+      return { success: true, group: { id: group.id, groupId: group.groupId, name: group.name } };
+    }),
+  }),
   pdfs: router({
-    list: publicProcedure.input(z.object({ q: z.string().optional(), subjectId: z.number().int().positive().optional(), unit: z.string().optional(), sort: z.enum(["latest", "downloads", "views", "az"]).optional(), page: z.number().int().positive().optional() }).optional()).query(({ input }) => listPdfs(input)),
-    get: publicProcedure.input(pdfIdInput).query(({ input }) => getPdfById(input.id)),
+    list: publicProcedure.input(z.object({ q: z.string().optional(), subjectId: z.number().int().positive().optional(), unit: z.string().optional(), sort: z.enum(["latest", "downloads", "views", "az"]).optional(), page: z.number().int().positive().optional() }).optional()).query(({ input, ctx }) => listPdfs({ ...input, userId: ctx.user?.id })),
+    get: publicProcedure.input(pdfIdInput).query(({ input, ctx }) => getPdfById(input.id, ctx.user?.id)),
     upload: protectedProcedure.input(uploadInput).mutation(async ({ input, ctx }) => {
       const baseName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-180);
       const key = `studentshare/${ctx.user.id}/${Date.now()}-${baseName}`;
@@ -71,9 +100,11 @@ export const appRouter = router({
       }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable." });
+      if (input.groupId && !(await isGroupMember(input.groupId, ctx.user.id))) throw new TRPCError({ code: "FORBIDDEN", message: "Join this group before uploading into it." });
       const result = await db.insert(pdfFiles).values({
         title: input.title,
         subjectId: input.subjectId,
+        groupId: input.groupId || null,
         unit: input.unit,
         description: input.description || null,
         tags: input.tags || null,
@@ -86,7 +117,7 @@ export const appRouter = router({
         semester: input.semester || null,
       });
       const id = Number(result[0].insertId);
-      const pdf = await getPdfById(id);
+      const pdf = await getPdfById(id, ctx.user.id);
       if (!pdf) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "PDF was uploaded but could not be loaded." });
       return { success: true, id, pdf, message: "PDF uploaded successfully!" };
     }),
@@ -112,16 +143,17 @@ export const appRouter = router({
     view: publicProcedure.input(pdfIdInput).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return { success: false };
+      if (!(await getPdfById(input.id, ctx.user?.id))) throw new TRPCError({ code: "NOT_FOUND", message: "PDF not found." });
       await db.insert(views).values({ pdfId: input.id, userId: ctx.user?.id ?? null });
       await db.update(pdfFiles).set({ viewCount: sql`${pdfFiles.viewCount} + 1` }).where(eq(pdfFiles.id, input.id));
       return { success: true };
     }),
-    download: publicProcedure.input(pdfIdInput).mutation(async ({ input }) => {
+    download: publicProcedure.input(pdfIdInput).mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable." });
-      const record = await db.select({ id: pdfFiles.id }).from(pdfFiles).where(eq(pdfFiles.id, input.id)).limit(1);
-      if (!record[0]) throw new TRPCError({ code: "NOT_FOUND", message: "PDF not found." });
-      return { success: true, url: `/api/pdfs/${record[0].id}/download` };
+      const pdf = await getPdfById(input.id, ctx.user?.id);
+      if (!pdf) throw new TRPCError({ code: "NOT_FOUND", message: "PDF not found." });
+      return { success: true, url: `/api/pdfs/${pdf.id}/download` };
     }),
     report: protectedProcedure.input(z.object({ pdfId: z.number().int().positive(), reason: z.string().trim().min(2).max(80), description: z.string().trim().max(1000).optional() })).mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -132,8 +164,8 @@ export const appRouter = router({
   }),
   dashboard: router({
     stats: protectedProcedure.query(({ ctx }) => getDashboardStats(ctx.user.id)),
-    recent: publicProcedure.query(() => listPdfs({ page: 1, pageSize: 6, sort: "latest" })),
-    popular: publicProcedure.query(() => listPdfs({ page: 1, pageSize: 6, sort: "downloads" })),
+    recent: publicProcedure.query(({ ctx }) => listPdfs({ page: 1, pageSize: 6, sort: "latest", userId: ctx.user?.id })),
+    popular: publicProcedure.query(({ ctx }) => listPdfs({ page: 1, pageSize: 6, sort: "downloads", userId: ctx.user?.id })),
   }),
   uploads: router({
     mine: protectedProcedure.query(({ ctx }) => getMyUploads(ctx.user.id)),

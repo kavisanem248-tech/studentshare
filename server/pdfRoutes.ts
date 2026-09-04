@@ -4,6 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { downloads, pdfFiles } from "../drizzle/schema";
 import { getDb, getPdfStorageRecord } from "./db";
 import { storageGetSignedUrl } from "./storage";
+import { sdk } from "./_core/sdk";
 
 function copyFileHeaders(upstream: globalThis.Response, res: ExpressResponse) {
   res.setHeader("Content-Type", "application/pdf");
@@ -21,7 +22,13 @@ async function fetchStoredPdf(req: Request, res: ExpressResponse, disposition: "
     res.status(400).json({ error: "Invalid PDF id" });
     return null;
   }
-  const record = await getPdfStorageRecord(id);
+  let userId: number | undefined;
+  try {
+    userId = (await sdk.authenticateRequest(req)).id;
+  } catch {
+    // Public PDFs remain readable without a session; private group PDFs resolve as not found.
+  }
+  const record = await getPdfStorageRecord(id, userId);
   if (!record) {
     res.status(404).json({ error: "PDF not found" });
     return null;
