@@ -6,6 +6,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
 import { useTheme } from "@/contexts/ThemeContext";
 import { trpc } from "@/lib/trpc";
+import { primaryNavigation } from "../../../shared/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -68,14 +69,16 @@ type PdfCardData = {
   description?: string | null;
 };
 
-const navLinks = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/subjects", label: "Subjects", icon: Library },
-  { href: "/browse", label: "Browse PDFs", icon: Search },
-  { href: "/groups", label: "Friend circles", icon: Users },
-  { href: "/upload", label: "Upload PDF", icon: CloudUpload },
-  { href: "/uploads", label: "My uploads", icon: FileText },
-];
+const navIcons = {
+  "/dashboard": LayoutDashboard,
+  "/subjects": Library,
+  "/browse": Search,
+  "/groups": Users,
+  "/upload": CloudUpload,
+  "/uploads": FileText,
+} as const;
+
+const navLinks = primaryNavigation.map(item => ({ ...item, icon: navIcons[item.href] }));
 
 const subjectsFallback = [
   { name: "Data Structures", code: "CS 201", tone: "blue" },
@@ -133,10 +136,10 @@ function AppShell({ children }: { children: React.ReactNode }) {
               <span className="mt-1 block text-[9px] font-bold uppercase tracking-[0.2em] text-slate-400">Find. Share. Learn.</span>
             </span>
           </Link>
-          <nav className="hidden items-center gap-1 lg:flex">
-            {navLinks.slice(1, 4).map(item => (
-              <Link key={item.href} href={item.href} className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${location === item.href ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:bg-white hover:text-slate-950"}`}>
-                {item.label}
+          <nav className="hidden items-center gap-0.5 lg:flex">
+            {navLinks.filter(item => item.href !== "/upload").map(item => (
+              <Link key={item.href} href={item.href} className={`rounded-full px-3 py-2 text-sm font-semibold transition-colors ${location === item.href ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:bg-white hover:text-slate-950"}`}>
+                {item.label === "Browse PDFs" ? "Browse" : item.label === "Friend circles" ? "Circles" : item.label}
               </Link>
             ))}
             <Link href="/upload" className="ml-2 inline-flex items-center gap-2 rounded-full bg-[#3457e5] px-4 py-2.5 text-sm font-bold text-white shadow-[0_8px_18px_rgba(52,87,229,0.2)] transition-all hover:-translate-y-0.5 hover:bg-[#2849d7] active:scale-[.98]">
