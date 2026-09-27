@@ -1,0 +1,45 @@
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.env
+server/.env
+client/.env
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Production Builds
+dist/
+**/dist/
+build/
+**/build/
+
+# Local Database & SQLite files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+data/*.db
+data/*.db-journal
+server/data/
+**/data/
+
+# Uploaded Material Blobs & Temp Storage
+server/uploads/*
+!server/uploads/.gitkeep
+test-upload.pdf
+test-env.js
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor & OS Metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
