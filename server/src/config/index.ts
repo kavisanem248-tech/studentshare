@@ -25,6 +25,6 @@ export const config = {
     region: process.env.STORAGE_REGION || 'us-east-1',
   },
   aiApiKey: process.env.AI_API_KEY || '',
-  clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
+  clientUrl: process.env.CLIENT_URL || (process.env.NODE_ENV === 'production' ? 'https://studentshare-1.onrender.com' : 'http://localhost:5173'),
   uploadsDir: path.resolve(__dirname, '../../uploads'),
 };

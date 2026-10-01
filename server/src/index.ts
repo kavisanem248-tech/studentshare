@@ -22,13 +22,41 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
-// CORS configuration
-app.use(cors({
-  origin: true, // Allow frontend dev and preview servers
+// CORS configuration allowing deployed frontend, local environments, and preview deployments
+const allowedOrigins = [
+  'https://studentshare-1.onrender.com',
+  'https://studentshare-backend-map3.onrender.com',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:4173',
+  'http://127.0.0.1:5173',
+  config.clientUrl,
+];
+
+const allowedOriginRegex = /^(https?:\/\/(localhost|127\.0\.0\.1|.*\.onrender\.com|.*\.vercel\.app|.*\.netlify\.app|.*\.pages\.dev)(:\d+)?)$/;
+
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, callback) => {
+    // Allow server-to-server, curl, mobile apps, or same-origin requests
+    if (!origin) return callback(null, true);
+
+    if (
+      allowedOrigins.includes(origin) ||
+      allowedOriginRegex.test(origin)
+    ) {
+      return callback(null, true);
+    }
+    // Permissive fallback to allow deployed custom frontend domains while preserving credentials
+    return callback(null, true);
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  exposedHeaders: ['Content-Disposition'],
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 // Body parsers
 app.use(express.json({ limit: '50mb' }));

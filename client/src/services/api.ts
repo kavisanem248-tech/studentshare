@@ -10,7 +10,63 @@ import {
   PaginatedResult,
 } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+// Default backend URLs
+const DEFAULT_DEV_BACKEND_URL = 'http://localhost:5000';
+const DEFAULT_PROD_BACKEND_URL = 'https://studentshare-backend-map3.onrender.com';
+
+/**
+ * Resolves and normalizes the backend API base URL.
+ * Handles trailing slashes, missing /api paths, environment overrides,
+ * prevents duplicate /api/api pathing, eliminates hardcoded local addresses in production,
+ * and maintains localhost:5000 for local development.
+ */
+function resolveApiBaseUrl(): string {
+  const isDev = Boolean(import.meta.env.DEV);
+  const envUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+
+  let url: string;
+
+  if (isDev) {
+    // Development mode:
+    // Prefer VITE_API_URL if explicitly provided; otherwise default to http://localhost:5000
+    url = envUrl || DEFAULT_DEV_BACKEND_URL;
+  } else {
+    // Production mode (build / production deployment):
+    // Use VITE_API_URL if valid remote URL; otherwise safely default to live Render backend
+    if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+      url = envUrl;
+    } else {
+      url = DEFAULT_PROD_BACKEND_URL;
+    }
+  }
+
+  // Runtime safety: if running in a non-localhost browser window, never target localhost
+  if (
+    typeof window !== 'undefined' &&
+    window.location.hostname &&
+    window.location.hostname !== 'localhost' &&
+    window.location.hostname !== '127.0.0.1'
+  ) {
+    if (url.includes('localhost') || url.includes('127.0.0.1')) {
+      url = DEFAULT_PROD_BACKEND_URL;
+    }
+  }
+
+  // Remove trailing slashes
+  url = url.replace(/\/+$/, '');
+
+  // Remove duplicate /api segments if already present (e.g., https://.../api/api)
+  url = url.replace(/\/api\/+api(\/|$)/g, '/api$1');
+
+  // Ensure it ends with /api (without duplicating /api)
+  if (!url.endsWith('/api')) {
+    url = `${url}/api`;
+  }
+
+  return url;
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 class ApiService {
   private getHeaders(isFormData = false): HeadersInit {
@@ -28,14 +84,37 @@ class ApiService {
     return headers;
   }
 
-  private async request<T>(url: string, init?: RequestInit): Promise<T> {
+  private async request<T>(endpointOrUrl: string, init?: RequestInit): Promise<T> {
+    let targetUrl: string;
+
+    if (endpointOrUrl.startsWith('http://') || endpointOrUrl.startsWith('https://')) {
+      targetUrl = endpointOrUrl;
+    } else {
+      // Prevent duplicated /api/api if endpoint already begins with /api
+      let cleanEndpoint = endpointOrUrl.trim();
+      if (cleanEndpoint.startsWith('/api/')) {
+        cleanEndpoint = cleanEndpoint.substring(4);
+      } else if (cleanEndpoint === '/api') {
+        cleanEndpoint = '';
+      }
+
+      const slash = cleanEndpoint.startsWith('/') || cleanEndpoint === '' ? '' : '/';
+      targetUrl = `${API_BASE_URL}${slash}${cleanEndpoint}`;
+    }
+
+    // Guard against any accidental /api/api in the constructed URL
+    targetUrl = targetUrl.replace(/\/api\/+api(\/|$)/g, '/api$1');
+
     let res: Response;
     try {
-      res = await fetch(url, init);
+      res = await fetch(targetUrl, {
+        credentials: 'include',
+        ...init,
+      });
     } catch (networkErr: any) {
-      console.error('[ApiService] Network request failed:', networkErr);
+      console.error('[ApiService] Network request failed:', targetUrl, networkErr);
       throw new Error(
-        'Unable to connect to StudentShare backend server (Network Error). Please verify the server is running on http://localhost:5000.'
+        'Unable to connect to StudentShare backend server. Please verify your internet connection or try again later.'
       );
     }
     return this.handleResponse<T>(res);
@@ -46,7 +125,7 @@ class ApiService {
     try {
       data = await res.json();
     } catch {
-      data = { error: 'Invalid response received from server.' };
+      data = { error: `Invalid response received from server (HTTP ${res.status}).` };
     }
 
     if (!res.ok) {
@@ -63,7 +142,7 @@ class ApiService {
 
   // Health
   async getHealth(): Promise<{ status: string; service: string; database: string }> {
-    return this.request(`${API_BASE_URL}/health`);
+    return this.request('/health');
   }
 
   // Auth Providers configuration check
@@ -75,7 +154,7 @@ class ApiService {
       ai: { configured: boolean };
     };
   }> {
-    return this.request(`${API_BASE_URL}/auth/providers`);
+    return this.request('/auth/providers');
   }
 
   // Authentication
@@ -87,7 +166,7 @@ class ApiService {
     year?: string;
     semester?: string;
   }): Promise<{ success: boolean; token: string; user: User; message: string }> {
-    return this.request(`${API_BASE_URL}/auth/register`, {
+    return this.request('/auth/register', {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
@@ -100,7 +179,7 @@ class ApiService {
     user: User;
     message: string;
   }> {
-    return this.request(`${API_BASE_URL}/auth/login`, {
+    return this.request('/auth/login', {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
@@ -113,7 +192,7 @@ class ApiService {
     user: User;
     message: string;
   }> {
-    return this.request(`${API_BASE_URL}/auth/google`, {
+    return this.request('/auth/google', {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
@@ -121,13 +200,13 @@ class ApiService {
   }
 
   async getMe(): Promise<{ success: boolean; user: User }> {
-    return this.request(`${API_BASE_URL}/auth/me`, {
+    return this.request('/auth/me', {
       headers: this.getHeaders(),
     });
   }
 
   async forgotPassword(email: string): Promise<{ success: boolean; message: string }> {
-    return this.request(`${API_BASE_URL}/auth/forgot-password`, {
+    return this.request('/auth/forgot-password', {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ email }),
@@ -135,7 +214,7 @@ class ApiService {
   }
 
   async resetPassword(body: { email: string; newPassword: string }): Promise<{ success: boolean; message: string }> {
-    return this.request(`${API_BASE_URL}/auth/reset-password`, {
+    return this.request('/auth/reset-password', {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
@@ -163,10 +242,10 @@ class ApiService {
         }
       });
     }
-    const res = await fetch(`${API_BASE_URL}/materials?${query.toString()}`, {
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return this.request<PaginatedResult<Material>>(`/materials${qs}`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async searchMaterials(params: {
@@ -186,70 +265,66 @@ class ApiService {
         query.append(key, String(val));
       }
     });
-    const res = await fetch(`${API_BASE_URL}/materials/search?${query.toString()}`, {
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return this.request<PaginatedResult<Material>>(`/materials/search${qs}`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async getMaterialById(id: string): Promise<{ success: boolean; data: Material }> {
-    const res = await fetch(`${API_BASE_URL}/materials/${id}`, {
+    return this.request(`/materials/${id}`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async uploadMaterial(formData: FormData): Promise<{ success: boolean; data: Material; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/materials`, {
+    return this.request(`/materials`, {
       method: 'POST',
       headers: this.getHeaders(true),
       body: formData,
     });
-    return this.handleResponse(res);
   }
 
   async updateMaterial(
     id: string,
     body: Partial<Material>
   ): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/materials/${id}`, {
+    return this.request(`/materials/${id}`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
     });
-    return this.handleResponse(res);
   }
 
   async deleteMaterial(id: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/materials/${id}`, {
+    return this.request(`/materials/${id}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   getDownloadUrl(id: string): string {
-    return `${API_BASE_URL}/materials/${id}/download`;
+    const url = `${API_BASE_URL}/materials/${id}/download`;
+    return url.replace(/\/api\/+api(\/|$)/g, '/api$1');
   }
 
   getPreviewUrl(id: string): string {
-    return `${API_BASE_URL}/materials/${id}/preview`;
+    const url = `${API_BASE_URL}/materials/${id}/preview`;
+    return url.replace(/\/api\/+api(\/|$)/g, '/api$1');
   }
 
   async saveMaterial(id: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/materials/${id}/save`, {
+    return this.request(`/materials/${id}/save`, {
       method: 'POST',
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async unsaveMaterial(id: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/materials/${id}/save`, {
+    return this.request(`/materials/${id}/save`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async rateMaterial(
@@ -257,12 +332,11 @@ class ApiService {
     rating: number,
     review?: string
   ): Promise<{ success: boolean; message: string; averageRating: number; ratingCount: number }> {
-    const res = await fetch(`${API_BASE_URL}/materials/${id}/rate`, {
+    return this.request(`/materials/${id}/rate`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ rating, review }),
     });
-    return this.handleResponse(res);
   }
 
   async reportMaterial(
@@ -270,12 +344,11 @@ class ApiService {
     reason: string,
     details?: string
   ): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/materials/${id}/report`, {
+    return this.request(`/materials/${id}/report`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ reason, details }),
     });
-    return this.handleResponse(res);
   }
 
   async getAiSummary(id: string): Promise<{
@@ -285,11 +358,10 @@ class ApiService {
     keyPoints?: string[];
     message?: string;
   }> {
-    const res = await fetch(`${API_BASE_URL}/materials/${id}/ai-summary`, {
+    return this.request(`/materials/${id}/ai-summary`, {
       method: 'POST',
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async askAiQuestion(
@@ -301,60 +373,53 @@ class ApiService {
     answer?: string;
     message?: string;
   }> {
-    const res = await fetch(`${API_BASE_URL}/materials/${id}/ai-ask`, {
+    return this.request(`/materials/${id}/ai-ask`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ question }),
     });
-    return this.handleResponse(res);
   }
 
   // User Student Area
   async getSavedMaterials(): Promise<{ success: boolean; data: Material[] }> {
-    const res = await fetch(`${API_BASE_URL}/user/saved`, {
+    return this.request(`/user/saved`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async getDownloadHistory(): Promise<{ success: boolean; data: any[] }> {
-    const res = await fetch(`${API_BASE_URL}/user/downloads`, {
+    return this.request(`/user/downloads`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async getMyUploads(): Promise<{ success: boolean; data: Material[] }> {
-    const res = await fetch(`${API_BASE_URL}/user/uploads`, {
+    return this.request(`/user/uploads`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async updateProfile(body: Partial<User>): Promise<{ success: boolean; user: User; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/user/profile`, {
+    return this.request(`/user/profile`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
     });
-    return this.handleResponse(res);
   }
 
   async changePassword(body: { oldPassword: string; newPassword: string }): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/user/password`, {
+    return this.request(`/user/password`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
     });
-    return this.handleResponse(res);
   }
 
   // Friend Circles
   async getMyCircles(): Promise<{ success: boolean; data: CircleSummary[] }> {
-    const res = await fetch(`${API_BASE_URL}/circles`, {
+    return this.request(`/circles`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async createCircle(body: {
@@ -362,238 +427,210 @@ class ApiService {
     password: string;
     description?: string;
   }): Promise<{ success: boolean; message: string; data: any }> {
-    const res = await fetch(`${API_BASE_URL}/circles`, {
+    return this.request(`/circles`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
     });
-    return this.handleResponse(res);
   }
 
   async joinCircle(body: {
     name: string;
     password: string;
   }): Promise<{ success: boolean; message: string; circleId: string }> {
-    const res = await fetch(`${API_BASE_URL}/circles/join`, {
+    return this.request(`/circles/join`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
     });
-    return this.handleResponse(res);
   }
 
   async getCircleDetails(id: string): Promise<{ success: boolean; data: CircleDetail }> {
-    const res = await fetch(`${API_BASE_URL}/circles/${id}`, {
+    return this.request(`/circles/${id}`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async leaveCircle(id: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/circles/${id}/leave`, {
+    return this.request(`/circles/${id}/leave`, {
       method: 'POST',
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async deleteCircle(id: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/circles/${id}`, {
+    return this.request(`/circles/${id}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async updateCirclePassword(id: string, newPassword: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/circles/${id}/password`, {
+    return this.request(`/circles/${id}/password`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify({ newPassword }),
     });
-    return this.handleResponse(res);
   }
 
   async removeCircleMember(circleId: string, userId: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/circles/${circleId}/members/${userId}`, {
+    return this.request(`/circles/${circleId}/members/${userId}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async shareCircleMaterial(circleId: string, materialId: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/circles/${circleId}/materials`, {
+    return this.request(`/circles/${circleId}/materials`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ materialId }),
     });
-    return this.handleResponse(res);
   }
 
   async removeCircleMaterial(circleId: string, materialId: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/circles/${circleId}/materials/${materialId}`, {
+    return this.request(`/circles/${circleId}/materials/${materialId}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async createAnnouncement(circleId: string, body: { title: string; content: string }): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/circles/${circleId}/announcements`, {
+    return this.request(`/circles/${circleId}/announcements`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
     });
-    return this.handleResponse(res);
   }
 
   async deleteAnnouncement(circleId: string, announcementId: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/circles/${circleId}/announcements/${announcementId}`, {
+    return this.request(`/circles/${circleId}/announcements/${announcementId}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   // Notifications
   async getNotifications(): Promise<{ success: boolean; data: NotificationItem[]; unreadCount: number }> {
-    const res = await fetch(`${API_BASE_URL}/notifications`, {
+    return this.request(`/notifications`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async markNotificationRead(id: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/notifications/${id}/read`, {
+    return this.request(`/notifications/${id}/read`, {
       method: 'PUT',
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async markAllNotificationsRead(): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/notifications/read-all`, {
+    return this.request(`/notifications/read-all`, {
       method: 'PUT',
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   // Admin APIs
   async getAdminStats(): Promise<{ success: boolean; data: AdminStats }> {
-    const res = await fetch(`${API_BASE_URL}/admin/statistics`, {
+    return this.request(`/admin/statistics`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async getAdminUsers(): Promise<{ success: boolean; data: any[] }> {
-    const res = await fetch(`${API_BASE_URL}/admin/users`, {
+    return this.request(`/admin/users`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async toggleUserBan(id: string, isBanned: boolean): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/admin/users/${id}/ban`, {
+    return this.request(`/admin/users/${id}/ban`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify({ isBanned }),
     });
-    return this.handleResponse(res);
   }
 
   async updateUserRole(id: string, role: 'STUDENT' | 'ADMIN'): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/admin/users/${id}/role`, {
+    return this.request(`/admin/users/${id}/role`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify({ role }),
     });
-    return this.handleResponse(res);
   }
 
   async getAdminMaterials(): Promise<{ success: boolean; data: Material[] }> {
-    const res = await fetch(`${API_BASE_URL}/admin/materials`, {
+    return this.request(`/admin/materials`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async toggleMaterialApproval(id: string, isApproved: boolean): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/admin/materials/${id}/approve`, {
+    return this.request(`/admin/materials/${id}/approve`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify({ isApproved }),
     });
-    return this.handleResponse(res);
   }
 
   async deleteAdminMaterial(id: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/admin/materials/${id}`, {
+    return this.request(`/admin/materials/${id}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async getAdminReports(): Promise<{ success: boolean; data: ReportItem[] }> {
-    const res = await fetch(`${API_BASE_URL}/admin/reports`, {
+    return this.request(`/admin/reports`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async updateReportStatus(id: string, status: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/admin/reports/${id}/status`, {
+    return this.request(`/admin/reports/${id}/status`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify({ status }),
     });
-    return this.handleResponse(res);
   }
 
   async getAdminCircles(): Promise<{ success: boolean; data: any[] }> {
-    const res = await fetch(`${API_BASE_URL}/admin/circles`, {
+    return this.request(`/admin/circles`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async deleteAdminCircle(id: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/admin/circles/${id}`, {
+    return this.request(`/admin/circles/${id}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async getCategories(): Promise<{ success: boolean; data: Category[] }> {
-    const res = await fetch(`${API_BASE_URL}/admin/categories`, {
+    return this.request(`/admin/categories`, {
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   async createCategory(body: { name: string; code: string; description?: string }): Promise<{ success: boolean; data: Category }> {
-    const res = await fetch(`${API_BASE_URL}/admin/categories`, {
+    return this.request(`/admin/categories`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
     });
-    return this.handleResponse(res);
   }
 
   async deleteCategory(id: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE_URL}/admin/categories/${id}`, {
+    return this.request(`/admin/categories/${id}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
-    return this.handleResponse(res);
   }
 
   getBaseUrl(): string {
-    return API_BASE_URL;
+    return API_BASE_URL.replace(/\/api\/+api(\/|$)/g, '/api$1');
   }
 }
 

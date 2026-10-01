@@ -7,7 +7,7 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 
-const BASE_URL = 'http://localhost:5000/api';
+const BASE_URL = process.env.TEST_API_URL || 'http://localhost:5000/api';
 
 async function request(endpoint, options = {}) {
   const url = `${BASE_URL}${endpoint}`;

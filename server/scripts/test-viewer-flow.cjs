@@ -2,7 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const BASE_URL = 'http://localhost:5000';
+const BASE_URL = process.env.TEST_API_URL ? process.env.TEST_API_URL.replace(/\/api\/?$/, '') : 'http://localhost:5000';
 
 function postMultipart(urlPath, fields, fileField, token) {
   return new Promise((resolve, reject) => {
